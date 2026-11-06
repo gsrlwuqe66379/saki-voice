@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>客服小祥 · 实时语音座席</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #121319;
+      --card-bg: #1e2029;
+      --text: #e0e4eb;
+      --text-muted: #8b92a5;
+      --accent: #5e81ac;
+      --danger: #bf616a;
+      --success: #a3be8c;
+      --sakiko-cyan: #88c0d0;
+    }
+    body {
+      margin: 0;
+      padding: 20px;
+      background-color: var(--tg-theme-bg-color, var(--bg));
+      color: var(--tg-theme-text-color, var(--text));
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 90vh;
+      box-sizing: border-box;
+    }
+    .header {
+      text-align: center;
+      margin-top: 10px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(136, 192, 208, 0.15);
+      color: var(--sakiko-cyan);
+      border: 1px solid rgba(136, 192, 208, 0.3);
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 20px;
+      margin: 4px 0;
+      font-weight: 600;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 0;
+    }
+    .avatar-box {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2e3440, #4c566a);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 25px 0 15px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+      border: 3px solid var(--sakiko-cyan);
+    }
+    .avatar-inner {
+      text-align: center;
+    }
+    .avatar-icon {
+      font-size: 50px;
+    }
+    .avatar-title {
+      font-size: 11px;
+      color: var(--sakiko-cyan);
+      margin-top: 4px;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+    .visualizer-container {
+      width: 100%;
+      max-width: 320px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+    }
+    .live-transcript {
+      width: 100%;
+      max-width: 340px;
+      background: var(--card-bg);
+      border-radius: 14px;
+      padding: 14px 16px;
+      box-sizing: border-box;
+      font-size: 13px;
+      line-height: 1.5;
+      min-height: 85px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .transcript-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .transcript-text {
+      color: var(--text);
+    }
+    .quote {
+      font-style: italic;
+      color: var(--sakiko-cyan);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    .controls {
+      width: 100%;
+      max-width: 340px;
+      display: flex;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 14px 10px;
+      border-radius: 12px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+    button:active {
+      transform: scale(0.97);
+    }
+    .btn-mute {
+      background: #3b4252;
+      color: var(--text);
+    }
+    .btn-hangup {
+      background: var(--danger);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="badge">● 语音专线已接通 (LOW-LATENCY)</div>
+    <h1>丰川祥子 · 客服坐席专线</h1>
+    <p class="subtitle">工号 137 | 智能业务委托与需求澄清</p>
+  </div>
+
+  <div class="avatar-box">
+    <div class="avatar-inner">
+      <div class="avatar-icon">🎧</div>
+      <div class="avatar-title">TOGAWA SAKIKO</div>
+    </div>
+  </div>
+
+  <div class="visualizer-container">
+    <canvas id="waveform"></canvas>
+  </div>
+
+  <div class="live-transcript">
+    <div class="transcript-label">客服小祥实时受理中：</div>
+    <div class="transcript-text" id="transcript-display">“……您好，这里是客户服务中心。请直接清晰描述您的业务委托需求，挂断后我将立即排期派单。”</div>
+    <div class="quote" id="persona-quote">（……请不要无故占用客服线路。若有正经业务请直接讲。）</div>
+  </div>
+
+  <div class="controls">
+    <button class="btn-mute" id="mute-btn" onclick="toggleMute()">
+      <span id="mute-icon">🎙</span> <span id="mute-text">静音</span>
+    </button>
+    <button class="btn-hangup" onclick="hangupAndDispatch()">
+      <span>📞</span> 挂断并派单
+    </button>
+  </div>
+
+  <script>
+    // Initialize Telegram WebApp & Security Check
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.expand();
+      tg.ready();
+    } else {
+      // Direct browser access outside Telegram is blocked
+      document.body.innerHTML = `
+        <div style="text-align:center;padding:50px 20px;font-family:sans-serif;">
+          <div style="font-size:54px;">🔒</div>
+          <h2 style="color:#bf616a;margin:12px 0;">403 访问受限</h2>
+          <p style="color:#d8dee9;font-size:14px;">本页面仅供授权的 Telegram 客户端内联调用。</p>
+          <p style="font-size:12px;color:#88c0d0;margin-top:20px;">请通过指定 Bot 会话窗口唤起使用</p>
+        </div>
+      `;
+      throw new Error("Unauthorized Access");
+    }
+
+    let isMuted = false;
+    function toggleMute() {
+      isMuted = !isMuted;
+      document.getElementById('mute-icon').innerText = isMuted ? '🔇' : '🎙';
+      document.getElementById('mute-text').innerText = isMuted ? '恢复' : '静音';
+      document.getElementById('mute-btn').style.background = isMuted ? '#4c566a' : '#3b4252';
+    }
+
+    function hangupAndDispatch() {
+      const promptText = prompt("【语音工单结单确认】请输入或补充您本次通话委托的具体内容：", "帮我深度调查下华夏基金开发研发岗位的应届生薪资水平，全力调查，不要给我模糊结论");
+      if (!promptText) return;
+
+      const payload = {
+        action: "voice_dispatch",
+        requirement: promptText,
+        session_id: "voice-" + Math.random().toString(36).substring(2, 9),
+        timestamp: Date.now()
+      };
+
+      if (tg && tg.sendData) {
+        tg.sendData(JSON.stringify(payload));
+      } else {
+        alert("已提交语音需求: " + promptText + "\n(在 Telegram 内运行将自动推入执行引擎)");
+      }
+    }
+
+    // Animated waveform canvas
+    const canvas = document.getElementById('waveform');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+
+    let phase = 0;
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = isMuted ? '#4c566a' : '#88c0d0';
+      ctx.beginPath();
+      
+      const width = canvas.width;
+      const height = canvas.height;
+      const mid = height / 2;
+      
+      for (let x = 0; x < width; x += 4) {
+        const amp = isMuted ? 3 : (12 + Math.sin(phase * 0.1) * 8);
+        const y = mid + Math.sin((x * 0.03) + phase) * amp * Math.sin(x / width * Math.PI);
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      phase += isMuted ? 0.02 : 0.08;
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>
