@@ -263,6 +263,7 @@
     let isMuted = false;
     let isHangingUp = false;
     let isConnected = false;
+    let hasServerTranscript = false;
     let callSeconds = 0;
     let timerInterval = null;
 
@@ -271,6 +272,8 @@
     let micCtx = null;
     let playCtx = null;
     let workletNode = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
     let nextPlayTime = 0;
     let activeSources = [];
 
@@ -298,6 +301,7 @@
         const mins = String(Math.floor(callSeconds / 60)).padStart(2, '0');
         const secs = String(callSeconds % 60).padStart(2, '0');
         timerEl.innerText = `${mins}:${secs}`;
+        resumeAudioIfNeeded();
       }, 1000);
     }
 
@@ -311,6 +315,19 @@
       return btoa(binary);
     }
 
+    function blobToBase64(blob) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = reader.result || '';
+          const idx = res.indexOf(',');
+          resolve(idx !== -1 ? res.slice(idx + 1) : '');
+        };
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(blob);
+      });
+    }
+
     function base64ToInt16Array(b64) {
       const binary = atob(b64);
       const len = binary.length;
@@ -321,14 +338,15 @@
       return new Int16Array(bytes.buffer);
     }
 
-    function ensurePlayContext() {
+    function ensureAudioContexts() {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!playCtx) {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
         playCtx = new AudioCtx({ sampleRate: 24000 });
       }
-      if (playCtx.state === 'suspended') {
-        playCtx.resume().catch(() => {});
+      if (!micCtx) {
+        micCtx = new AudioCtx();
       }
+      resumeAudioIfNeeded();
     }
 
     function resumeAudioIfNeeded() {
@@ -337,6 +355,7 @@
     }
     document.addEventListener('pointerdown', resumeAudioIfNeeded, { passive: true });
     document.addEventListener('touchstart', resumeAudioIfNeeded, { passive: true });
+    document.addEventListener('click', resumeAudioIfNeeded, { passive: true });
 
     // Instant Barge-In: immediately stop & flush all scheduled Sakiko audio buffers
     function flushPlaybackQueue() {
@@ -356,7 +375,7 @@
     }
 
     function enqueueSakikoPcm24k(b64Data) {
-      ensurePlayContext();
+      ensureAudioContexts();
       const int16 = base64ToInt16Array(b64Data);
       if (int16.length === 0) return;
 
@@ -394,19 +413,54 @@
       };
     }
 
+    function startBackupMediaRecorder(stream) {
+      try {
+        recordedChunks = [];
+        const mimeCandidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus',
+          'audio/mp4'
+        ];
+        let chosenMime = '';
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
+          for (const m of mimeCandidates) {
+            if (MediaRecorder.isTypeSupported(m)) {
+              chosenMime = m;
+              break;
+            }
+          }
+        }
+        mediaRecorder = chosenMime
+          ? new MediaRecorder(stream, { mimeType: chosenMime, audioBitsPerSecond: 32000 })
+          : new MediaRecorder(stream);
+
+        mediaRecorder.ondataavailable = (evt) => {
+          if (evt.data && evt.data.size > 0 && !isMuted) {
+            recordedChunks.push(evt.data);
+          }
+        };
+        mediaRecorder.start(250);
+      } catch (e) {
+        console.warn('MediaRecorder backup not available:', e);
+      }
+    }
+
     async function setupMicrophoneCapture() {
+      ensureAudioContexts();
+
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 16000
+          autoGainControl: true
         }
       });
 
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      micCtx = new AudioCtx();
+      await micCtx.resume().catch(() => {});
+      startBackupMediaRecorder(micStream);
+
       const sourceNode = micCtx.createMediaStreamSource(micStream);
 
       const workletCode = `
@@ -447,6 +501,17 @@
         registerProcessor('sakiko-pcm-processor', SakikoPcmProcessor);
       `;
 
+      const handlePcmChunk = (pcmBuffer, rms) => {
+        micEnergy = isMuted ? 0 : Math.min(1.0, (rms || 0) * 5.5);
+        if (!isMuted && micEnergy > 0.04 && !hasServerTranscript) {
+          userTextEl.innerText = '🎙 正在收音并实时传输给小祥...';
+        }
+        if (!isMuted && !isHangingUp && ws && ws.readyState === WebSocket.OPEN) {
+          const b64 = arrayBufferToBase64(pcmBuffer);
+          ws.send(JSON.stringify({ type: 'audio', payload: { data: b64 } }));
+        }
+      };
+
       if (micCtx.audioWorklet) {
         const blob = new Blob([workletCode], { type: 'application/javascript' });
         const blobUrl = URL.createObjectURL(blob);
@@ -455,17 +520,11 @@
 
         workletNode = new AudioWorkletNode(micCtx, 'sakiko-pcm-processor');
         workletNode.port.onmessage = (evt) => {
-          const { pcmBuffer, rms } = evt.data;
-          micEnergy = isMuted ? 0 : Math.min(1.0, (rms || 0) * 5.0);
-          if (!isMuted && !isHangingUp && ws && ws.readyState === WebSocket.OPEN) {
-            const b64 = arrayBufferToBase64(pcmBuffer);
-            ws.send(JSON.stringify({ type: 'audio', payload: { data: b64 } }));
-          }
+          handlePcmChunk(evt.data.pcmBuffer, evt.data.rms);
         };
         sourceNode.connect(workletNode);
         workletNode.connect(micCtx.destination);
       } else {
-        // Fallback for older WebViews without AudioWorklet
         const scriptNode = micCtx.createScriptProcessor(4096, 1, 1);
         const ratio = micCtx.sampleRate / 16000;
         let outBuf = new Int16Array(1600);
@@ -482,14 +541,12 @@
             sumSq += s * s;
             outBuf[outIdx++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             if (outIdx >= outBuf.length) {
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                const copy = outBuf.slice(0);
-                ws.send(JSON.stringify({ type: 'audio', payload: { data: arrayBufferToBase64(copy.buffer) } }));
-              }
+              const copy = outBuf.slice(0);
+              const rms = Math.sqrt(sumSq / (ch.length / ratio));
+              handlePcmChunk(copy.buffer, rms);
               outIdx = 0;
             }
           }
-          micEnergy = Math.min(1.0, Math.sqrt(sumSq / (ch.length / ratio)) * 5.0);
         };
         sourceNode.connect(scriptNode);
         scriptNode.connect(micCtx.destination);
@@ -518,7 +575,9 @@
     }
 
     async function initFullDuplexCall() {
-      ensurePlayContext();
+      // Pre-create both AudioContexts synchronously before any await
+      ensureAudioContexts();
+
       const endpoint = await resolveWsEndpoint();
       if (!endpoint) {
         setBadge('● 语音网关未就绪 (请回聊天窗输入 /call)', 'error');
@@ -537,6 +596,7 @@
       ws = new WebSocket(endpoint);
 
       ws.onopen = () => {
+        resumeAudioIfNeeded();
         ws.send(JSON.stringify({
           type: 'auth',
           payload: {
@@ -571,6 +631,7 @@
           if (payload.role === 'sakiko' && payload.text) {
             sakikoTextEl.innerText = `“${payload.text}”`;
           } else if (payload.role === 'user' && payload.text) {
+            hasServerTranscript = true;
             userTextEl.innerText = payload.text;
           }
         } else if (type === 'ticket_created' && payload) {
@@ -609,19 +670,36 @@
       if (isMuted) micEnergy = 0;
     }
 
-    function stopMediaResources() {
+    async function stopMediaAndCollectRecording() {
       flushPlaybackQueue();
       if (workletNode) {
         try { workletNode.disconnect(); } catch (_) {}
         workletNode = null;
       }
+
+      let recordingB64 = '';
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        await new Promise((resolve) => {
+          mediaRecorder.onstop = resolve;
+          try { mediaRecorder.stop(); } catch (_) { resolve(); }
+          setTimeout(resolve, 400);
+        });
+      }
+      if (recordedChunks.length > 0) {
+        const fullBlob = new Blob(recordedChunks, { type: mediaRecorder?.mimeType || 'audio/webm' });
+        if (fullBlob.size > 1000 && fullBlob.size < 8 * 1024 * 1024) {
+          recordingB64 = await blobToBase64(fullBlob);
+        }
+      }
+
       if (micStream) {
         micStream.getTracks().forEach(t => t.stop());
         micStream = null;
       }
+      return recordingB64;
     }
 
-    function hangupAndDispatch() {
+    async function hangupAndDispatch() {
       if (isHangingUp) return;
       isHangingUp = true;
       if (timerInterval) clearInterval(timerInterval);
@@ -632,23 +710,25 @@
       setBadge('⏳ 正在挂断并由小祥提炼结构化工单...', '');
       quoteEl.innerText = '正在将通话记录移交后台调度引擎，请稍候...';
 
-      stopMediaResources();
+      const recordingB64 = await stopMediaAndCollectRecording();
 
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'hangup',
-          payload: { reason: 'user_action' }
+          payload: {
+            reason: 'user_action',
+            recording_b64: recordingB64
+          }
         }));
-        // Safety fallback timeout if network drops before ticket_created arrives
         setTimeout(() => {
           if (tg && tg.close) tg.close();
-        }, 6500);
+        }, 7000);
       } else {
         if (tg && tg.close) tg.close();
       }
     }
 
-    // Real-time dual-channel waveform visualizer (responds to both User Mic and Sakiko Audio)
+    // Real-time dual-channel waveform visualizer
     const canvas = document.getElementById('waveform');
     const ctx = canvas.getContext('2d');
     canvas.width = (canvas.offsetWidth || 300) * 2;
@@ -660,9 +740,9 @@
       const activeEnergy = Math.max(micEnergy, sakikoEnergy);
       ctx.lineWidth = 4;
       if (sakikoEnergy > micEnergy && sakikoEnergy > 0.04) {
-        ctx.strokeStyle = '#88c0d0'; // Sakiko cyan
+        ctx.strokeStyle = '#88c0d0';
       } else if (micEnergy > 0.04) {
-        ctx.strokeStyle = '#a3be8c'; // User green
+        ctx.strokeStyle = '#a3be8c';
       } else {
         ctx.strokeStyle = isMuted ? '#4c566a' : 'rgba(136, 192, 208, 0.45)';
       }
