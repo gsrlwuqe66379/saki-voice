@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>客服小祥 · 实时语音座席</title>
+  <title>客服小祥 · 全双工实时电话专线</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root {
@@ -15,10 +15,11 @@
       --danger: #bf616a;
       --success: #a3be8c;
       --sakiko-cyan: #88c0d0;
+      --warn: #ebcb8b;
     }
     body {
       margin: 0;
-      padding: 20px;
+      padding: 18px;
       background-color: var(--tg-theme-bg-color, var(--bg));
       color: var(--tg-theme-text-color, var(--text));
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -26,12 +27,13 @@
       flex-direction: column;
       align-items: center;
       justify-content: space-between;
-      min-height: 90vh;
+      min-height: 92vh;
       box-sizing: border-box;
+      user-select: none;
     }
     .header {
       text-align: center;
-      margin-top: 10px;
+      margin-top: 6px;
     }
     .badge {
       display: inline-block;
@@ -41,40 +43,64 @@
       font-weight: 600;
       background: rgba(136, 192, 208, 0.15);
       color: var(--sakiko-cyan);
-      border: 1px solid rgba(136, 192, 208, 0.3);
-      margin-bottom: 8px;
+      border: 1px solid rgba(136, 192, 208, 0.35);
+      margin-bottom: 6px;
+      transition: all 0.25s ease;
+    }
+    .badge.connected {
+      background: rgba(163, 190, 140, 0.18);
+      color: var(--success);
+      border-color: rgba(163, 190, 140, 0.45);
+    }
+    .badge.error {
+      background: rgba(191, 97, 106, 0.2);
+      color: var(--danger);
+      border-color: rgba(191, 97, 106, 0.45);
     }
     h1 {
-      font-size: 20px;
+      font-size: 19px;
       margin: 4px 0;
       font-weight: 600;
     }
     p.subtitle {
-      font-size: 13px;
+      font-size: 12px;
       color: var(--text-muted);
       margin: 0;
     }
+    .timer {
+      font-family: "SF Mono", Consolas, monospace;
+      font-size: 13px;
+      color: var(--sakiko-cyan);
+      margin-top: 4px;
+      letter-spacing: 1px;
+    }
     .avatar-box {
       position: relative;
-      width: 140px;
-      height: 140px;
+      width: 132px;
+      height: 132px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #2e3440, #4c566a);
+      background: linear-gradient(135deg, #2e3440, #3b4252);
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 25px 0 15px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+      margin: 14px 0 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
       border: 3px solid var(--sakiko-cyan);
+      transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.2s ease;
+    }
+    .avatar-box.speaking {
+      box-shadow: 0 0 32px rgba(136, 192, 208, 0.75);
+      transform: scale(1.04);
+      border-color: #a3be8c;
     }
     .avatar-inner {
       text-align: center;
     }
     .avatar-icon {
-      font-size: 50px;
+      font-size: 46px;
     }
     .avatar-title {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--sakiko-cyan);
       margin-top: 4px;
       font-weight: bold;
@@ -83,7 +109,7 @@
     .visualizer-container {
       width: 100%;
       max-width: 320px;
-      height: 60px;
+      height: 54px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -94,38 +120,51 @@
     }
     .live-transcript {
       width: 100%;
-      max-width: 340px;
+      max-width: 350px;
       background: var(--card-bg);
       border-radius: 14px;
-      padding: 14px 16px;
+      padding: 12px 15px;
       box-sizing: border-box;
       font-size: 13px;
       line-height: 1.5;
-      min-height: 85px;
-      border: 1px solid rgba(255,255,255,0.06);
+      min-height: 110px;
+      border: 1px solid rgba(255,255,255,0.07);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .turn-block {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
     .transcript-label {
       font-size: 11px;
       color: var(--text-muted);
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+    }
+    .transcript-label.user-label {
+      color: var(--success);
     }
     .transcript-text {
       color: var(--text);
+      word-break: break-word;
     }
     .quote {
       font-style: italic;
       color: var(--sakiko-cyan);
-      font-size: 12px;
-      margin-top: 6px;
+      font-size: 11.5px;
+      margin-top: 2px;
+      opacity: 0.85;
     }
     .controls {
       width: 100%;
-      max-width: 340px;
+      max-width: 350px;
       display: flex;
       gap: 12px;
-      margin-bottom: 10px;
+      margin-top: 10px;
+      margin-bottom: 6px;
     }
     button {
       flex: 1;
@@ -144,6 +183,10 @@
     button:active {
       transform: scale(0.97);
     }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
     .btn-mute {
       background: #3b4252;
       color: var(--text);
@@ -156,14 +199,15 @@
 </head>
 <body>
   <div class="header">
-    <div class="badge">● 语音专线已接通 (LOW-LATENCY)</div>
+    <div class="badge" id="status-badge">● 正在呼叫坐席专线...</div>
     <h1>丰川祥子 · 客服坐席专线</h1>
-    <p class="subtitle">工号 137 | 智能业务委托与需求澄清</p>
+    <p class="subtitle">工号 137 | Gemini Live 全双工实时语音</p>
+    <div class="timer" id="call-timer">00:00</div>
   </div>
 
-  <div class="avatar-box">
+  <div class="avatar-box" id="avatar-box" onclick="resumeAudioIfNeeded()">
     <div class="avatar-inner">
-      <div class="avatar-icon">🎧</div>
+      <div class="avatar-icon" id="avatar-icon">🎧</div>
       <div class="avatar-title">TOGAWA SAKIKO</div>
     </div>
   </div>
@@ -173,28 +217,36 @@
   </div>
 
   <div class="live-transcript">
-    <div class="transcript-label">客服小祥实时受理中：</div>
-    <div class="transcript-text" id="transcript-display">“……您好，这里是客户服务中心。请直接清晰描述您的业务委托需求，挂断后我将立即排期派单。”</div>
-    <div class="quote" id="persona-quote">（……请不要无故占用客服线路。若有正经业务请直接讲。）</div>
+    <div class="turn-block">
+      <div class="transcript-label">🎧 客服小祥（工号 137）：</div>
+      <div class="transcript-text" id="sakiko-transcript">“……正在接通语音坐席，请允许麦克风权限后直接开口说话。”</div>
+    </div>
+    <div class="turn-block" style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px;">
+      <div class="transcript-label user-label">🗣 您的实时发言（支持随时插话打断）：</div>
+      <div class="transcript-text" id="user-transcript" style="color: #d8dee9;">（聆听中……）</div>
+    </div>
+    <div class="quote" id="persona-quote">※ 需求核实完毕后点击下方【挂断并派单】，系统将自动生成工单</div>
   </div>
 
   <div class="controls">
     <button class="btn-mute" id="mute-btn" onclick="toggleMute()">
       <span id="mute-icon">🎙</span> <span id="mute-text">静音</span>
     </button>
-    <button class="btn-hangup" onclick="hangupAndDispatch()">
-      <span>📞</span> 挂断并派单
+    <button class="btn-hangup" id="hangup-btn" onclick="hangupAndDispatch()">
+      <span>📞</span> <span id="hangup-text">挂断并派单</span>
     </button>
   </div>
 
   <script>
-    // Initialize Telegram WebApp & Security Check
     const tg = window.Telegram?.WebApp;
+    const urlParams = new URLSearchParams(window.location.search);
+    let wsUrl = urlParams.get('ws') || '';
+    let authToken = urlParams.get('token') || '';
+
     if (tg) {
       tg.expand();
       tg.ready();
-    } else {
-      // Direct browser access outside Telegram is blocked
+    } else if (!wsUrl && !authToken) {
       document.body.innerHTML = `
         <div style="text-align:center;padding:50px 20px;font-family:sans-serif;">
           <div style="font-size:54px;">🔒</div>
@@ -206,60 +258,433 @@
       throw new Error("Unauthorized Access");
     }
 
+    // State
+    let ws = null;
     let isMuted = false;
-    function toggleMute() {
-      isMuted = !isMuted;
-      document.getElementById('mute-icon').innerText = isMuted ? '🔇' : '🎙';
-      document.getElementById('mute-text').innerText = isMuted ? '恢复' : '静音';
-      document.getElementById('mute-btn').style.background = isMuted ? '#4c566a' : '#3b4252';
+    let isHangingUp = false;
+    let isConnected = false;
+    let callSeconds = 0;
+    let timerInterval = null;
+
+    // Audio contexts & state
+    let micStream = null;
+    let micCtx = null;
+    let playCtx = null;
+    let workletNode = null;
+    let nextPlayTime = 0;
+    let activeSources = [];
+
+    // Visualizer energy levels
+    let micEnergy = 0;
+    let sakikoEnergy = 0;
+
+    const badgeEl = document.getElementById('status-badge');
+    const sakikoTextEl = document.getElementById('sakiko-transcript');
+    const userTextEl = document.getElementById('user-transcript');
+    const quoteEl = document.getElementById('persona-quote');
+    const avatarBoxEl = document.getElementById('avatar-box');
+    const timerEl = document.getElementById('call-timer');
+
+    function setBadge(text, cls = '') {
+      badgeEl.innerText = text;
+      badgeEl.className = 'badge' + (cls ? ' ' + cls : '');
     }
 
-    function hangupAndDispatch() {
-      const promptText = prompt("【语音工单结单确认】请输入或补充您本次通话委托的具体内容：", "帮我深度调查下华夏基金开发研发岗位的应届生薪资水平，全力调查，不要给我模糊结论");
-      if (!promptText) return;
+    function startTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      callSeconds = 0;
+      timerInterval = setInterval(() => {
+        callSeconds++;
+        const mins = String(Math.floor(callSeconds / 60)).padStart(2, '0');
+        const secs = String(callSeconds % 60).padStart(2, '0');
+        timerEl.innerText = `${mins}:${secs}`;
+      }, 1000);
+    }
 
-      const payload = {
-        action: "voice_dispatch",
-        requirement: promptText,
-        session_id: "voice-" + Math.random().toString(36).substring(2, 9),
-        timestamp: Date.now()
-      };
+    function arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+      }
+      return btoa(binary);
+    }
 
-      if (tg && tg.sendData) {
-        tg.sendData(JSON.stringify(payload));
-      } else {
-        alert("已提交语音需求: " + promptText + "\n(在 Telegram 内运行将自动推入执行引擎)");
+    function base64ToInt16Array(b64) {
+      const binary = atob(b64);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return new Int16Array(bytes.buffer);
+    }
+
+    function ensurePlayContext() {
+      if (!playCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        playCtx = new AudioCtx({ sampleRate: 24000 });
+      }
+      if (playCtx.state === 'suspended') {
+        playCtx.resume().catch(() => {});
       }
     }
 
-    // Animated waveform canvas
+    function resumeAudioIfNeeded() {
+      if (playCtx && playCtx.state === 'suspended') playCtx.resume().catch(() => {});
+      if (micCtx && micCtx.state === 'suspended') micCtx.resume().catch(() => {});
+    }
+    document.addEventListener('pointerdown', resumeAudioIfNeeded, { passive: true });
+    document.addEventListener('touchstart', resumeAudioIfNeeded, { passive: true });
+
+    // Instant Barge-In: immediately stop & flush all scheduled Sakiko audio buffers
+    function flushPlaybackQueue() {
+      for (const src of activeSources) {
+        try {
+          src.onended = null;
+          src.stop(0);
+          src.disconnect();
+        } catch (_) {}
+      }
+      activeSources = [];
+      if (playCtx) {
+        nextPlayTime = playCtx.currentTime;
+      }
+      sakikoEnergy = 0;
+      avatarBoxEl.classList.remove('speaking');
+    }
+
+    function enqueueSakikoPcm24k(b64Data) {
+      ensurePlayContext();
+      const int16 = base64ToInt16Array(b64Data);
+      if (int16.length === 0) return;
+
+      const float32 = new Float32Array(int16.length);
+      let sumSq = 0;
+      for (let i = 0; i < int16.length; i++) {
+        const sample = int16[i] / 32768.0;
+        float32[i] = sample;
+        sumSq += sample * sample;
+      }
+      const rms = Math.sqrt(sumSq / int16.length);
+      sakikoEnergy = Math.min(1.0, rms * 4.5);
+      avatarBoxEl.classList.add('speaking');
+
+      const audioBuffer = playCtx.createBuffer(1, float32.length, 24000);
+      audioBuffer.getChannelData(0).set(float32);
+
+      const source = playCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(playCtx.destination);
+
+      const now = playCtx.currentTime;
+      const startAt = Math.max(now + 0.015, nextPlayTime);
+      source.start(startAt);
+      nextPlayTime = startAt + audioBuffer.duration;
+
+      activeSources.push(source);
+      source.onended = () => {
+        const idx = activeSources.indexOf(source);
+        if (idx !== -1) activeSources.splice(idx, 1);
+        if (activeSources.length === 0) {
+          sakikoEnergy = 0;
+          avatarBoxEl.classList.remove('speaking');
+        }
+      };
+    }
+
+    async function setupMicrophoneCapture() {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000
+        }
+      });
+
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      micCtx = new AudioCtx();
+      const sourceNode = micCtx.createMediaStreamSource(micStream);
+
+      const workletCode = `
+        class SakikoPcmProcessor extends AudioWorkletProcessor {
+          constructor() {
+            super();
+            this.buffer = new Int16Array(1600); // 100ms at 16kHz
+            this.writeIndex = 0;
+            this.resamplePos = 0;
+          }
+          process(inputs) {
+            const input = inputs[0];
+            if (!input || !input[0]) return true;
+            const channel = input[0];
+            const ratio = sampleRate / 16000;
+
+            let sumSq = 0;
+            for (let i = 0; i < channel.length; i++) {
+              sumSq += channel[i] * channel[i];
+            }
+            const rms = Math.sqrt(sumSq / channel.length);
+
+            while (this.resamplePos < channel.length) {
+              const idx = Math.floor(this.resamplePos);
+              const s = Math.max(-1, Math.min(1, channel[idx] || 0));
+              this.buffer[this.writeIndex++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              if (this.writeIndex >= this.buffer.length) {
+                const chunk = this.buffer.slice(0);
+                this.port.postMessage({ pcmBuffer: chunk.buffer, rms }, [chunk.buffer]);
+                this.writeIndex = 0;
+              }
+              this.resamplePos += ratio;
+            }
+            this.resamplePos -= channel.length;
+            return true;
+          }
+        }
+        registerProcessor('sakiko-pcm-processor', SakikoPcmProcessor);
+      `;
+
+      if (micCtx.audioWorklet) {
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        await micCtx.audioWorklet.addModule(blobUrl);
+        URL.revokeObjectURL(blobUrl);
+
+        workletNode = new AudioWorkletNode(micCtx, 'sakiko-pcm-processor');
+        workletNode.port.onmessage = (evt) => {
+          const { pcmBuffer, rms } = evt.data;
+          micEnergy = isMuted ? 0 : Math.min(1.0, (rms || 0) * 5.0);
+          if (!isMuted && !isHangingUp && ws && ws.readyState === WebSocket.OPEN) {
+            const b64 = arrayBufferToBase64(pcmBuffer);
+            ws.send(JSON.stringify({ type: 'audio', payload: { data: b64 } }));
+          }
+        };
+        sourceNode.connect(workletNode);
+        workletNode.connect(micCtx.destination);
+      } else {
+        // Fallback for older WebViews without AudioWorklet
+        const scriptNode = micCtx.createScriptProcessor(4096, 1, 1);
+        const ratio = micCtx.sampleRate / 16000;
+        let outBuf = new Int16Array(1600);
+        let outIdx = 0;
+        scriptNode.onaudioprocess = (e) => {
+          if (isMuted || isHangingUp) {
+            micEnergy = 0;
+            return;
+          }
+          const ch = e.inputBuffer.getChannelData(0);
+          let sumSq = 0;
+          for (let i = 0; i < ch.length; i += ratio) {
+            const s = Math.max(-1, Math.min(1, ch[Math.floor(i)] || 0));
+            sumSq += s * s;
+            outBuf[outIdx++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            if (outIdx >= outBuf.length) {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                const copy = outBuf.slice(0);
+                ws.send(JSON.stringify({ type: 'audio', payload: { data: arrayBufferToBase64(copy.buffer) } }));
+              }
+              outIdx = 0;
+            }
+          }
+          micEnergy = Math.min(1.0, Math.sqrt(sumSq / (ch.length / ratio)) * 5.0);
+        };
+        sourceNode.connect(scriptNode);
+        scriptNode.connect(micCtx.destination);
+        workletNode = scriptNode;
+      }
+    }
+
+    async function resolveWsEndpoint() {
+      if (!wsUrl) {
+        try {
+          const res = await fetch(`./ws_config.json?t=${Date.now()}`, { cache: 'no-store' });
+          if (res.ok) {
+            const cfg = await res.json();
+            if (cfg.ws) wsUrl = cfg.ws;
+            if (cfg.token && !authToken) authToken = cfg.token;
+          }
+        } catch (_) {}
+      }
+      if (!wsUrl && window.location.protocol.startsWith('http') && !window.location.host.includes('github.io')) {
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${proto}//${window.location.host}/ws/voice`;
+      }
+      if (!wsUrl) return '';
+      const sep = wsUrl.includes('?') ? '&' : '?';
+      return `${wsUrl}${sep}token=${encodeURIComponent(authToken)}`;
+    }
+
+    async function initFullDuplexCall() {
+      ensurePlayContext();
+      const endpoint = await resolveWsEndpoint();
+      if (!endpoint) {
+        setBadge('● 语音网关未就绪 (请回聊天窗输入 /call)', 'error');
+        sakikoTextEl.innerText = '“……坐席隧道正在初始化，请返回聊天框发送 /call 刷新专线入口。”';
+        return;
+      }
+
+      try {
+        await setupMicrophoneCapture();
+      } catch (err) {
+        setBadge('● 麦克风权限被拒绝', 'error');
+        sakikoTextEl.innerText = '“……未能获取您的麦克风权限。请允许浏览器/Telegram 使用麦克风后重试。”';
+        return;
+      }
+
+      ws = new WebSocket(endpoint);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          type: 'auth',
+          payload: {
+            token: authToken,
+            init_data: (tg && tg.initData) ? tg.initData : ''
+          }
+        }));
+      };
+
+      ws.onmessage = (evt) => {
+        let msg;
+        try {
+          msg = JSON.parse(evt.data);
+        } catch (_) {
+          return;
+        }
+        const { type, payload } = msg;
+
+        if (type === 'ready') {
+          isConnected = true;
+          setBadge('● 全双工实时语音已接通 (LIVE)', 'connected');
+          startTimer();
+          if (payload && payload.greeting) {
+            sakikoTextEl.innerText = `“${payload.greeting}”`;
+          }
+        } else if (type === 'audio' && payload && payload.data) {
+          enqueueSakikoPcm24k(payload.data);
+        } else if (type === 'interrupted') {
+          flushPlaybackQueue();
+          quoteEl.innerText = '⚡ 检测到您开口插话，小祥已切回聆听状态';
+        } else if (type === 'transcript' && payload) {
+          if (payload.role === 'sakiko' && payload.text) {
+            sakikoTextEl.innerText = `“${payload.text}”`;
+          } else if (payload.role === 'user' && payload.text) {
+            userTextEl.innerText = payload.text;
+          }
+        } else if (type === 'ticket_created' && payload) {
+          if (payload.is_task) {
+            setBadge(`✅ 工单 #${payload.task_id} 已立项排期`, 'connected');
+            sakikoTextEl.innerText = `“已为您立项【${payload.title}】（单号 #${payload.task_id}），正在移交 ${payload.model || '4H'} 执行。”`;
+          } else {
+            setBadge('● 通话已结束', '');
+            sakikoTextEl.innerText = `“${payload.summary || '感谢您的致电，失礼了。'}”`;
+          }
+          setTimeout(() => {
+            if (tg && tg.close) tg.close();
+          }, 1100);
+        } else if (type === 'error' && payload) {
+          setBadge(`● 连接异常 (${payload.code || 500})`, 'error');
+          sakikoTextEl.innerText = `“${payload.message || '坐席线路中断'}”`;
+        }
+      };
+
+      ws.onerror = () => {
+        if (!isHangingUp) {
+          setBadge('● 语音专线重连中...', 'error');
+        }
+      };
+
+      ws.onclose = () => {
+        if (timerInterval) clearInterval(timerInterval);
+      };
+    }
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      document.getElementById('mute-icon').innerText = isMuted ? '🔇' : '🎙';
+      document.getElementById('mute-text').innerText = isMuted ? '恢复发言' : '静音';
+      document.getElementById('mute-btn').style.background = isMuted ? '#4c566a' : '#3b4252';
+      if (isMuted) micEnergy = 0;
+    }
+
+    function stopMediaResources() {
+      flushPlaybackQueue();
+      if (workletNode) {
+        try { workletNode.disconnect(); } catch (_) {}
+        workletNode = null;
+      }
+      if (micStream) {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+      }
+    }
+
+    function hangupAndDispatch() {
+      if (isHangingUp) return;
+      isHangingUp = true;
+      if (timerInterval) clearInterval(timerInterval);
+
+      const hangupBtn = document.getElementById('hangup-btn');
+      hangupBtn.disabled = true;
+      document.getElementById('hangup-text').innerText = '正在结单...';
+      setBadge('⏳ 正在挂断并由小祥提炼结构化工单...', '');
+      quoteEl.innerText = '正在将通话记录移交后台调度引擎，请稍候...';
+
+      stopMediaResources();
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'hangup',
+          payload: { reason: 'user_action' }
+        }));
+        // Safety fallback timeout if network drops before ticket_created arrives
+        setTimeout(() => {
+          if (tg && tg.close) tg.close();
+        }, 6500);
+      } else {
+        if (tg && tg.close) tg.close();
+      }
+    }
+
+    // Real-time dual-channel waveform visualizer (responds to both User Mic and Sakiko Audio)
     const canvas = document.getElementById('waveform');
     const ctx = canvas.getContext('2d');
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = canvas.offsetHeight * 2;
+    canvas.width = (canvas.offsetWidth || 300) * 2;
+    canvas.height = (canvas.offsetHeight || 54) * 2;
 
     let phase = 0;
-    function draw() {
+    function drawWaveform() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const activeEnergy = Math.max(micEnergy, sakikoEnergy);
       ctx.lineWidth = 4;
-      ctx.strokeStyle = isMuted ? '#4c566a' : '#88c0d0';
+      if (sakikoEnergy > micEnergy && sakikoEnergy > 0.04) {
+        ctx.strokeStyle = '#88c0d0'; // Sakiko cyan
+      } else if (micEnergy > 0.04) {
+        ctx.strokeStyle = '#a3be8c'; // User green
+      } else {
+        ctx.strokeStyle = isMuted ? '#4c566a' : 'rgba(136, 192, 208, 0.45)';
+      }
+
       ctx.beginPath();
-      
       const width = canvas.width;
       const height = canvas.height;
       const mid = height / 2;
-      
+      const dynamicAmp = isMuted ? 2 : (4 + activeEnergy * (height * 0.42));
+
       for (let x = 0; x < width; x += 4) {
-        const amp = isMuted ? 3 : (12 + Math.sin(phase * 0.1) * 8);
-        const y = mid + Math.sin((x * 0.03) + phase) * amp * Math.sin(x / width * Math.PI);
+        const envelope = Math.sin((x / width) * Math.PI);
+        const y = mid + Math.sin((x * 0.035) + phase) * dynamicAmp * envelope;
         if (x === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
-      phase += isMuted ? 0.02 : 0.08;
-      requestAnimationFrame(draw);
+      phase += 0.06 + activeEnergy * 0.18;
+      requestAnimationFrame(drawWaveform);
     }
-    draw();
+    drawWaveform();
+    window.addEventListener('DOMContentLoaded', initFullDuplexCall);
   </script>
 </body>
 </html>
